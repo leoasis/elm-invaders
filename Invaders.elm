@@ -36,12 +36,21 @@ be an empty list (no objects at the start):
     defaultGame = { objects = [] }
 
 ------------------------------------------------------------------------------}
+(gameWidth, gameHeight) = (800, 600)
+(halfWidth, halfHeight) = (gameWidth/2, gameHeight/2)
 
-type GameState = {}
+type Position obj = {obj | x:Float, y:Float}
+type Ship = Position {}
+type Enemy = Position {}
+type GameState = {ship: Ship, enemies: [Enemy]}
 
 defaultGame : GameState
-defaultGame = {}
+defaultGame = {ship={x=0, y=-halfHeight + 30}, enemies=defaultEnemies}
 
+defaultEnemies : [Enemy]
+defaultEnemies =
+  let enemyPosition i = {x=-halfWidth + 30 + i * 60, y=halfHeight - 30}
+   in map enemyPosition [0..9]
 
 
 {-- Part 3: Update the game ---------------------------------------------------
@@ -67,8 +76,18 @@ Task: redefine `display` to use the GameState you defined in part 2.
 
 ------------------------------------------------------------------------------}
 
+displayObj : Form -> Position a -> Form
+displayObj form obj = move (obj.x, obj.y) form
+
+displayShip = displayObj (filled white (rect 30 30))
+displayEnemy = displayObj (filled red (rect 30 30))
+
 display : (Int,Int) -> GameState -> Element
-display (w,h) gameState = asText gameState
+display (w,h) {ship, enemies} = container w h middle <|
+                            collage gameWidth gameHeight ([
+                              filled black (rect gameWidth gameHeight),
+                              displayShip ship
+                            ] ++ map displayEnemy enemies)
 
 
 
