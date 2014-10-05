@@ -1,6 +1,7 @@
 module Invaders where
 
 import Window
+import Keyboard
 
 {-- Part 1: Model the user input ----------------------------------------------
 
@@ -12,10 +13,10 @@ Task: Redefine `UserInput` to include all of the information you need.
 
 ------------------------------------------------------------------------------}
 
-type UserInput = {}
+type UserInput = {direction: Int}
 
 userInput : Signal UserInput
-userInput = constant {}
+userInput = UserInput <~ lift .x Keyboard.arrows
 
 type Input = { timeDelta:Float, userInput:UserInput }
 
@@ -40,16 +41,18 @@ be an empty list (no objects at the start):
 (halfWidth, halfHeight) = (gameWidth/2, gameHeight/2)
 
 type Position obj = {obj | x:Float, y:Float}
-type Ship = Position {}
-type Enemy = Position {}
+type VelocityX obj = {obj | vx:Float}
+type Size obj = {obj | w:Float, h:Float}
+type Ship = Position (VelocityX (Size {}))
+type Enemy = Position (Size {})
 type GameState = {ship: Ship, enemies: [Enemy]}
 
 defaultGame : GameState
-defaultGame = {ship={x=0, y=-halfHeight + 30}, enemies=defaultEnemies}
+defaultGame = {ship={x=0, y=-halfHeight + 30, w=30, h=30, vx=1/6}, enemies=defaultEnemies}
 
 defaultEnemies : [Enemy]
 defaultEnemies =
-  let enemyPosition i = {x=-halfWidth + 30 + i * 60, y=halfHeight - 30}
+  let enemyPosition i = {x=-halfWidth + 30 + i * 60, y=halfHeight - 30, w=30, h=30}
    in map enemyPosition [0..9]
 
 
@@ -64,9 +67,13 @@ Task: redefine `stepGame` to use the UserInput and GameState
 ------------------------------------------------------------------------------}
 
 stepGame : Input -> GameState -> GameState
-stepGame {timeDelta,userInput} gameState = gameState
+stepGame {timeDelta, userInput} ({ship} as game) =
+  let ship' = moveShip userInput.direction timeDelta ship
+  in
+    { game | ship <- ship' }
 
-
+moveShip : Int -> Time -> Ship -> Ship
+moveShip direction t ({x, vx} as ship) = {ship | x <- x + (toFloat direction * vx) * t}
 
 {-- Part 4: Display the game --------------------------------------------------
 
@@ -76,11 +83,14 @@ Task: redefine `display` to use the GameState you defined in part 2.
 
 ------------------------------------------------------------------------------}
 
-displayObj : Form -> Position a -> Form
-displayObj form obj = move (obj.x, obj.y) form
+displayInPosition : Form -> Position a -> Form
+displayInPosition form obj = move (obj.x, obj.y) form
 
-displayShip = displayObj (filled white (rect 30 30))
-displayEnemy = displayObj (filled red (rect 30 30))
+shipShape ship = (filled white (rect ship.w ship.w))
+displayShip ship = displayInPosition (shipShape ship) ship
+
+enemyShape enemy = (filled red (rect enemy.w enemy.h))
+displayEnemy enemy = displayInPosition (enemyShape enemy) enemy
 
 display : (Int,Int) -> GameState -> Element
 display (w,h) {ship, enemies} = container w h middle <|
