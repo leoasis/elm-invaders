@@ -96,11 +96,11 @@ stepGame {timeDelta, userInput} ({ship, shipMissile, enemies} as game) =
       enemies' = map (moveEnemy timeDelta) enemies
 
       -- Then detect collissions
-      enemies'' = case shipMissile of
-        Just missile -> filter (not << collide (moveMissile timeDelta missile)) enemies'
+      enemies'' = case shipMissile' of
+        Just missile -> filterMap (destroyIf (shouldDestroyEnemy missile)) enemies'
         Nothing      -> enemies'
 
-      shipMissile'' = flatMapMaybe destroyIfOutOfBounds >> flatMapMaybe (destroyIfCollidesWithAny enemies) <| shipMissile'
+      shipMissile'' = flatMapMaybe (destroyIf (shouldDestroyMissile enemies)) <| shipMissile'
   in
     { game | ship <- ship', shipMissile <- shipMissile'', enemies <- enemies'' }
 
@@ -117,22 +117,37 @@ collide a b =
       collidesVertically = ((bottom a) < (bottom b) && (bottom b) < (top a)) || ((bottom b) < (bottom a) && (bottom a) < (top b))
   in collidesHorizontally && collidesVertically
 
-destroyIfCollidesWithAny : [Enemy] -> ShipMissile -> Maybe ShipMissile
-destroyIfCollidesWithAny enemies missile =
-  if (any (collide missile) enemies) then Nothing else Just missile
+collidesWithAny : [Position (Size a)] -> Position (Size b) -> Bool
+collidesWithAny entities entity = any (collide entity) entities
 
-destroyIfOutOfBounds : ShipMissile -> Maybe ShipMissile
-destroyIfOutOfBounds missile = if missile.y > halfHeight then Nothing else Just missile
+outOfBounds : Position a -> Bool
+outOfBounds entity =
+  (entity.y > halfHeight) ||
+  (entity.y < -halfHeight) ||
+  (entity.x > halfWidth) ||
+  (entity.x < -halfWidth)
 
+destroyIf : (a -> Bool) -> a -> Maybe a
+destroyIf test entity = if test entity then Nothing else Just entity
+
+-- Enemies logic
 moveEnemy : Time -> Enemy -> Enemy
 moveEnemy t enemy = enemy
 
+shouldDestroyEnemy : ShipMissile -> Enemy -> Bool
+shouldDestroyEnemy missile = collide missile
+
+-- Ship missile logic
 moveMissile : Time -> ShipMissile -> ShipMissile
 moveMissile t ({y, vy, h} as missile) =
   let vy' = shipMissileSpeed
       y'  = y + (vy') * t
   in {missile | y <- y', vy <- vy'}
 
+shouldDestroyMissile : [Enemy] -> ShipMissile -> Bool
+shouldDestroyMissile enemies missile = (outOfBounds missile) || (collidesWithAny enemies missile)
+
+-- Ship logic
 moveShip : Int -> Time -> Ship -> Ship
 moveShip direction t ({x, vx, w} as ship) =
   let vx' = toFloat direction * shipSpeed
