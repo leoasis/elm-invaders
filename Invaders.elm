@@ -39,6 +39,7 @@ be an empty list (no objects at the start):
 ------------------------------------------------------------------------------}
 (gameWidth, gameHeight) = (800, 600)
 (halfWidth, halfHeight) = (gameWidth/2, gameHeight/2)
+shipSpeed = 1/6
 
 type Position obj = {obj | x:Float, y:Float}
 type VelocityX obj = {obj | vx:Float}
@@ -48,7 +49,7 @@ type Enemy = Position (Size {})
 type GameState = {ship: Ship, enemies: [Enemy]}
 
 defaultGame : GameState
-defaultGame = {ship={x=0, y=-halfHeight + 30, w=30, h=30, vx=1/6}, enemies=defaultEnemies}
+defaultGame = {ship={x=0, y=-halfHeight + 30, w=30, h=30, vx=0}, enemies=defaultEnemies}
 
 defaultEnemies : [Enemy]
 defaultEnemies =
@@ -73,7 +74,10 @@ stepGame {timeDelta, userInput} ({ship} as game) =
     { game | ship <- ship' }
 
 moveShip : Int -> Time -> Ship -> Ship
-moveShip direction t ({x, vx} as ship) = {ship | x <- x + (toFloat direction * vx) * t}
+moveShip direction t ({x, vx, w} as ship) =
+  let vx' = toFloat direction * shipSpeed
+      x'  = clamp (w-halfWidth) (halfWidth-w) (x + (vx') * t)
+  in {ship | x <- x', vx <- vx'}
 
 {-- Part 4: Display the game --------------------------------------------------
 
