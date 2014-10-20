@@ -43,6 +43,7 @@ be an empty list (no objects at the start):
 (halfWidth, halfHeight) = (gameWidth/2, gameHeight/2)
 shipSpeed = 1/6
 shipMissileSpeed = 1/4
+enemyMissileSpeed = 1/8
 
 -- Components
 type Position obj = {obj | x:Float, y:Float}
@@ -54,11 +55,12 @@ type VelocityY obj = {obj | vy:Float}
 type Ship = Position (Size (VelocityX {}))
 type ShipMissile = Position (Size (VelocityY {}))
 type Enemy = Position (Size {})
+type EnemyMissile = Position (Size (VelocityY {}))
 
-type GameState = {ship: Ship, enemies: [Enemy], shipMissile: Maybe ShipMissile}
+type GameState = {ship: Ship, enemies: [Enemy], enemyMissiles: [EnemyMissile], shipMissile: Maybe ShipMissile}
 
 defaultGame : GameState
-defaultGame = {ship=defaultShip, enemies=defaultEnemies, shipMissile=Nothing}
+defaultGame = {ship=defaultShip, enemies=defaultEnemies, enemyMissiles=[], shipMissile=Nothing}
 
 defaultShip : Ship
 defaultShip = {x=0, y=-halfHeight + 30, w=30, h=30, vx=0}
@@ -85,15 +87,18 @@ flatMapMaybe f m = case (Maybe.map f m) of
   Nothing -> Nothing
 
 stepGame : Input -> GameState -> GameState
-stepGame {timeDelta, userInput} ({ship, shipMissile, enemies} as game) =
+stepGame {timeDelta, userInput} ({ship, shipMissile, enemies, enemyMissiles} as game) =
       -- First move the entities
   let ship' = moveShip userInput.direction timeDelta ship
 
       shipMissile' = case shipMissile of
-        Just missile -> Just <| moveMissile timeDelta missile
+        Just missile -> Just <| moveShipMissile timeDelta missile
         Nothing -> if userInput.shooting then Just (shootShipMissile ship) else Nothing
 
       enemies' = map (moveEnemy timeDelta) enemies
+      enemyMissiles' =
+        map (moveEnemyMissile timeDelta) enemyMissiles
+        ++ filterMap (tryShootEnemyMissile timeDelta enemyMissiles) enemies'
 
       -- Then detect collissions
       enemies'' = case shipMissile' of
@@ -102,10 +107,7 @@ stepGame {timeDelta, userInput} ({ship, shipMissile, enemies} as game) =
 
       shipMissile'' = flatMapMaybe (destroyIf (shouldDestroyMissile enemies)) <| shipMissile'
   in
-    { game | ship <- ship', shipMissile <- shipMissile'', enemies <- enemies'' }
-
-shootShipMissile : Ship -> ShipMissile
-shootShipMissile {x,y} = {x=x, y=y,vy=shipMissileSpeed,w=10,h=20}
+    { game | ship <- ship', shipMissile <- shipMissile'', enemies <- enemies'', enemyMissiles <- enemyMissiles' }
 
 collide : Position (Size a) -> Position (Size b) -> Bool
 collide a b =
@@ -130,16 +132,27 @@ outOfBounds entity =
 destroyIf : (a -> Bool) -> a -> Maybe a
 destroyIf test entity = if test entity then Nothing else Just entity
 
--- Enemies logic
+-- Enemy logic
 moveEnemy : Time -> Enemy -> Enemy
 moveEnemy t enemy = enemy
 
 shouldDestroyEnemy : ShipMissile -> Enemy -> Bool
 shouldDestroyEnemy missile = collide missile
 
+tryShootEnemyMissile : Time -> [EnemyMissile] -> Enemy -> Maybe EnemyMissile
+tryShootEnemyMissile t missiles enemy = Nothing--Just {x=enemy.x, y=enemy.y,vy=enemyMissileSpeed,w=10,h=20}
+
+-- Enemy missile logic
+moveEnemyMissile : Time -> EnemyMissile -> EnemyMissile
+moveEnemyMissile t ({y, vy, h} as missile) =
+  let vy' = enemyMissileSpeed
+      y'  = y - (vy') * t
+  in {missile | y <- y', vy <- vy'}
+
+
 -- Ship missile logic
-moveMissile : Time -> ShipMissile -> ShipMissile
-moveMissile t ({y, vy, h} as missile) =
+moveShipMissile : Time -> ShipMissile -> ShipMissile
+moveShipMissile t ({y, vy, h} as missile) =
   let vy' = shipMissileSpeed
       y'  = y + (vy') * t
   in {missile | y <- y', vy <- vy'}
@@ -153,6 +166,9 @@ moveShip direction t ({x, vx, w} as ship) =
   let vx' = toFloat direction * shipSpeed
       x'  = clamp (w-halfWidth) (halfWidth-w) (x + (vx') * t)
   in {ship | x <- x', vx <- vx'}
+
+shootShipMissile : Ship -> ShipMissile
+shootShipMissile {x,y} = {x=x, y=y,vy=shipMissileSpeed,w=10,h=20}
 
 {-- Part 4: Display the game --------------------------------------------------
 
@@ -174,15 +190,23 @@ displayShipMissile missile = displayInPosition (shipMissileShape missile) missil
 enemyShape enemy = (filled red (rect enemy.w enemy.h))
 displayEnemy enemy = displayInPosition (enemyShape enemy) enemy
 
+enemyMissileShape missile = (filled green (rect missile.w missile.h))
+displayEnemyMissile missile = displayInPosition (enemyMissileShape missile) missile
+
 wrapInList : a -> [a]
 wrapInList a = [a]
 
 display : (Int,Int) -> GameState -> Element
-display (w,h) {ship, enemies, shipMissile} = container w h middle <|
-                            collage gameWidth gameHeight ([
-                              filled black (rect gameWidth gameHeight),
-                              displayShip ship
-                            ] ++ map displayEnemy enemies ++ Maybe.maybe [] (displayShipMissile >> wrapInList) shipMissile)
+display (w,h) {ship, enemies, shipMissile, enemyMissiles} = container w h middle <|
+                            collage gameWidth gameHeight (
+                              [
+                                filled black (rect gameWidth gameHeight),
+                                displayShip ship
+                              ]
+                              ++ map displayEnemy enemies
+                              ++ Maybe.maybe [] (displayShipMissile >> wrapInList) shipMissile
+                              ++ map displayEnemyMissile enemyMissiles
+                            )
 
 
 
