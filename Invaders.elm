@@ -1,42 +1,33 @@
 module Invaders where
 
-import Window
+import Signal exposing ((<~), (~))
+import Time
+import Random
 import Keyboard
-import Maybe
+import Window
+import Graphics.Element
+import Graphics.Collage
+import Color
 
 {-- Part 1: Model the user input ----------------------------------------------
 
 What information do you need to represent all relevant user input?
 
-Task: Redefine `UserInput` to include all of the information you need.
-      Redefine `userInput` to be a signal that correctly models the user
-      input as described by `UserInput`.
-
 ------------------------------------------------------------------------------}
 
-type UserInput = {direction: Int, shooting: Bool}
+type alias UserInput = { direction: Int, shooting: Bool }
 
 userInput : Signal UserInput
-userInput = UserInput <~ lift .x Keyboard.arrows
+userInput = UserInput <~ Signal.map .x Keyboard.arrows
                        ~ Keyboard.space
 
-type Input = { timeDelta:Float, userInput:UserInput }
+type alias Input = { timeDelta:Float, userInput:UserInput }
 
 
 
 {-- Part 2: Model the game ----------------------------------------------------
 
 What information do you need to represent the entire game?
-
-Tasks: Redefine `GameState` to represent your particular game.
-       Redefine `defaultGame` to represent your initial game state.
-
-For example, if you want to represent many objects that just have a position,
-your GameState might just be a list of coordinates and your default game might
-be an empty list (no objects at the start):
-
-    type GameState = { objects : [(Float,Float)] }
-    defaultGame = { objects = [] }
 
 ------------------------------------------------------------------------------}
 (gameWidth, gameHeight) = (800, 600)
@@ -46,38 +37,44 @@ shipMissileSpeed = 1/4
 enemyMissileSpeed = 1/8
 
 -- Components
-type Position obj = {obj | x:Float, y:Float}
-type Size obj = {obj | w:Float, h:Float}
-type VelocityX obj = {obj | vx:Float}
-type VelocityY obj = {obj | vy:Float}
+type alias Position obj = {obj | x:Float, y:Float}
+type alias Size obj = {obj | w:Float, h:Float}
+type alias VelocityX obj = {obj | vx:Float}
+type alias VelocityY obj = {obj | vy:Float}
 
 -- Entities
-type Ship = Position (Size (VelocityX {}))
-type ShipMissile = Position (Size (VelocityY {}))
-type Enemy = Position (Size {})
-type EnemyMissile = Position (Size (VelocityY {}))
+type alias Ship = Position (Size (VelocityX {}))
+type alias ShipMissile = Position (Size (VelocityY {}))
+type alias Enemy = Position (Size {})
+type alias EnemyMissile = Position (Size (VelocityY {}))
 
-type GameState = {ship: Ship, enemies: [Enemy], enemyMissiles: [EnemyMissile], shipMissile: Maybe ShipMissile}
+type alias GameState = {
+  ship: Ship,
+  enemies: List Enemy,
+  enemyMissiles: List EnemyMissile,
+  shipMissile: Maybe ShipMissile,
+  seed: Random.Seed }
 
 defaultGame : GameState
-defaultGame = {ship=defaultShip, enemies=defaultEnemies, enemyMissiles=[], shipMissile=Nothing}
+defaultGame = {
+  ship=defaultShip,
+  enemies=defaultEnemies,
+  enemyMissiles=[],
+  shipMissile=Nothing,
+  seed=Random.initialSeed 0 }
 
 defaultShip : Ship
 defaultShip = {x=0, y=-halfHeight + 30, w=30, h=30, vx=0}
 
-defaultEnemies : [Enemy]
+defaultEnemies : List Enemy
 defaultEnemies =
   let enemyPosition i = {x=-halfWidth + 30 + i * 60, y=halfHeight - 30, w=30, h=30}
-   in map enemyPosition [0..9]
+   in List.map enemyPosition [0..9]
 
 
 {-- Part 3: Update the game ---------------------------------------------------
 
 How does the game step from one state to another based on user input?
-
-Task: redefine `stepGame` to use the UserInput and GameState
-      you defined in parts 1 and 2. Maybe use some helper functions
-      to break up the work, stepping smaller parts of the game.
 
 ------------------------------------------------------------------------------}
 
@@ -87,27 +84,28 @@ flatMapMaybe f m = case (Maybe.map f m) of
   Nothing -> Nothing
 
 stepGame : Input -> GameState -> GameState
-stepGame {timeDelta, userInput} ({ship, shipMissile, enemies, enemyMissiles} as game) =
+stepGame {timeDelta, userInput} ({ship, shipMissile, enemies, enemyMissiles, seed} as game) =
       -- First move the entities
-  let ship' = moveShip userInput.direction timeDelta ship
+  let (random, seed') = Random.generate (Random.float 0 1) game.seed
+      ship' = moveShip userInput.direction timeDelta ship
 
       shipMissile' = case shipMissile of
         Just missile -> Just <| moveShipMissile timeDelta missile
         Nothing -> if userInput.shooting then Just (shootShipMissile ship) else Nothing
 
-      enemies' = map (moveEnemy timeDelta) enemies
+      enemies' = List.map (moveEnemy timeDelta) enemies
       enemyMissiles' =
-        map (moveEnemyMissile timeDelta) enemyMissiles
-        ++ filterMap (tryShootEnemyMissile timeDelta enemyMissiles) enemies'
+        List.map (moveEnemyMissile timeDelta) enemyMissiles
+        ++ List.filterMap (tryShootEnemyMissile timeDelta random enemyMissiles) enemies'
 
       -- Then detect collissions
       enemies'' = case shipMissile' of
-        Just missile -> filterMap (destroyIf (shouldDestroyEnemy missile)) enemies'
+        Just missile -> List.filterMap (destroyIf (shouldDestroyEnemy missile)) enemies'
         Nothing      -> enemies'
 
       shipMissile'' = flatMapMaybe (destroyIf (shouldDestroyMissile enemies)) <| shipMissile'
   in
-    { game | ship <- ship', shipMissile <- shipMissile'', enemies <- enemies'', enemyMissiles <- enemyMissiles' }
+    { game | ship <- ship', shipMissile <- shipMissile'', enemies <- enemies'', enemyMissiles <- enemyMissiles', seed <- seed' }
 
 collide : Position (Size a) -> Position (Size b) -> Bool
 collide a b =
@@ -119,8 +117,8 @@ collide a b =
       collidesVertically = ((bottom a) < (bottom b) && (bottom b) < (top a)) || ((bottom b) < (bottom a) && (bottom a) < (top b))
   in collidesHorizontally && collidesVertically
 
-collidesWithAny : [Position (Size a)] -> Position (Size b) -> Bool
-collidesWithAny entities entity = any (collide entity) entities
+collidesWithAny : List (Position (Size a)) -> Position (Size b) -> Bool
+collidesWithAny entities entity = List.any (collide entity) entities
 
 outOfBounds : Position a -> Bool
 outOfBounds entity =
@@ -133,17 +131,21 @@ destroyIf : (a -> Bool) -> a -> Maybe a
 destroyIf test entity = if test entity then Nothing else Just entity
 
 -- Enemy logic
-moveEnemy : Time -> Enemy -> Enemy
+moveEnemy : Time.Time -> Enemy -> Enemy
 moveEnemy t enemy = enemy
 
 shouldDestroyEnemy : ShipMissile -> Enemy -> Bool
 shouldDestroyEnemy missile = collide missile
 
-tryShootEnemyMissile : Time -> [EnemyMissile] -> Enemy -> Maybe EnemyMissile
-tryShootEnemyMissile t missiles enemy = Nothing--Just {x=enemy.x, y=enemy.y,vy=enemyMissileSpeed,w=10,h=20}
+tryShootEnemyMissile : Time.Time -> Float -> List EnemyMissile -> Enemy -> Maybe EnemyMissile
+tryShootEnemyMissile t random missiles enemy =
+  if random > 0.8 then
+    Just {x=enemy.x, y=enemy.y,vy=enemyMissileSpeed,w=10,h=20}
+  else
+    Nothing
 
 -- Enemy missile logic
-moveEnemyMissile : Time -> EnemyMissile -> EnemyMissile
+moveEnemyMissile : Time.Time -> EnemyMissile -> EnemyMissile
 moveEnemyMissile t ({y, vy, h} as missile) =
   let vy' = enemyMissileSpeed
       y'  = y - (vy') * t
@@ -151,17 +153,17 @@ moveEnemyMissile t ({y, vy, h} as missile) =
 
 
 -- Ship missile logic
-moveShipMissile : Time -> ShipMissile -> ShipMissile
+moveShipMissile : Time.Time -> ShipMissile -> ShipMissile
 moveShipMissile t ({y, vy, h} as missile) =
   let vy' = shipMissileSpeed
       y'  = y + (vy') * t
   in {missile | y <- y', vy <- vy'}
 
-shouldDestroyMissile : [Enemy] -> ShipMissile -> Bool
+shouldDestroyMissile : List Enemy -> ShipMissile -> Bool
 shouldDestroyMissile enemies missile = (outOfBounds missile) || (collidesWithAny enemies missile)
 
 -- Ship logic
-moveShip : Int -> Time -> Ship -> Ship
+moveShip : Int -> Time.Time -> Ship -> Ship
 moveShip direction t ({x, vx, w} as ship) =
   let vx' = toFloat direction * shipSpeed
       x'  = clamp (w-halfWidth) (halfWidth-w) (x + (vx') * t)
@@ -174,38 +176,36 @@ shootShipMissile {x,y} = {x=x, y=y,vy=shipMissileSpeed,w=10,h=20}
 
 How should the GameState be displayed to the user?
 
-Task: redefine `display` to use the GameState you defined in part 2.
-
 ------------------------------------------------------------------------------}
 
-displayInPosition : Form -> Position a -> Form
-displayInPosition form obj = move (obj.x, obj.y) form
+displayInPosition : Graphics.Collage.Form -> Position a -> Graphics.Collage.Form
+displayInPosition form obj = Graphics.Collage.move (obj.x, obj.y) form
 
-shipShape ship = (filled white (rect ship.w ship.h))
+shipShape ship = (Graphics.Collage.filled Color.white (Graphics.Collage.rect ship.w ship.h))
 displayShip ship = displayInPosition (shipShape ship) ship
 
-shipMissileShape missile = (filled white (rect missile.w missile.h))
+shipMissileShape missile = (Graphics.Collage.filled Color.white (Graphics.Collage.rect missile.w missile.h))
 displayShipMissile missile = displayInPosition (shipMissileShape missile) missile
 
-enemyShape enemy = (filled red (rect enemy.w enemy.h))
+enemyShape enemy = (Graphics.Collage.filled Color.red (Graphics.Collage.rect enemy.w enemy.h))
 displayEnemy enemy = displayInPosition (enemyShape enemy) enemy
 
-enemyMissileShape missile = (filled green (rect missile.w missile.h))
+enemyMissileShape missile = (Graphics.Collage.filled Color.green (Graphics.Collage.rect missile.w missile.h))
 displayEnemyMissile missile = displayInPosition (enemyMissileShape missile) missile
 
-wrapInList : a -> [a]
+wrapInList : a -> List a
 wrapInList a = [a]
 
-display : (Int,Int) -> GameState -> Element
-display (w,h) {ship, enemies, shipMissile, enemyMissiles} = container w h middle <|
-                            collage gameWidth gameHeight (
+display : (Int,Int) -> GameState -> Graphics.Element.Element
+display (w,h) {ship, enemies, shipMissile, enemyMissiles} = Graphics.Element.container w h Graphics.Element.middle <|
+                            Graphics.Collage.collage gameWidth gameHeight (
                               [
-                                filled black (rect gameWidth gameHeight),
+                                Graphics.Collage.filled Color.black (Graphics.Collage.rect gameWidth gameHeight),
                                 displayShip ship
                               ]
-                              ++ map displayEnemy enemies
-                              ++ Maybe.maybe [] (displayShipMissile >> wrapInList) shipMissile
-                              ++ map displayEnemyMissile enemyMissiles
+                              ++ List.map displayEnemy enemies
+                              ++ Maybe.withDefault [] (Maybe.map (displayShipMissile >> wrapInList) shipMissile)
+                              ++ List.map displayEnemyMissile enemyMissiles
                             )
 
 
@@ -216,9 +216,9 @@ The following code puts it all together and shows it on screen.
 
 ------------------------------------------------------------------------------}
 
-delta = fps 30
-input = sampleOn delta (lift2 Input delta userInput)
+delta = Time.fps 30
+input = Signal.sampleOn delta (Signal.map2 Input delta userInput)
 
-gameState = foldp stepGame defaultGame input
+gameState = Signal.foldp stepGame defaultGame input
 
-main = lift2 display Window.dimensions gameState
+main = Signal.map2 display Window.dimensions gameState
